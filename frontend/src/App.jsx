@@ -6,7 +6,6 @@
  */
 
 import { useState, useCallback, useEffect } from 'react'
-import React from 'react'
 import './App.css'
 import Header from './components/Header'
 import SearchForm from './components/SearchForm'
@@ -15,7 +14,6 @@ import ErrorMessage from './components/ErrorMessage'
 import RecommendationsDisplay from './components/RecommendationsDisplay'
 import { useBookRecommendations } from './hooks/useBookRecommendations'
 import { useTags } from './hooks/useTags'
-// No need to import these - RecommendationsDisplay handles it internally
 
 // Configuration constants
 const MAX_BOOK_NAME_LENGTH = 200
@@ -141,7 +139,6 @@ function App() {
           availableTags={tagsHook.availableTags}
           selectedTags={tagsHook.selectedTags}
           loading={recommendations.loading}
-          loadingTags={tagsHook.loadingTags}
           hasRecommendations={!!recommendations.recommendations}
           onTagToggle={handleTagToggle}
         />

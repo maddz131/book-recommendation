@@ -54,7 +54,11 @@ function extractBookInfo(line) {
  * Creates search URLs for Goodreads or Amazon
  */
 function createSearchUrl(domain, bookTitle, bookAuthor) {
-  const searchQuery = bookAuthor ? `${bookTitle} ${bookAuthor}` : bookTitle
+  // Goodreads: use only book title (no author)
+  // Amazon: use book title and author
+  const searchQuery = domain === 'goodreads' 
+    ? bookTitle 
+    : (bookAuthor ? `${bookTitle} ${bookAuthor}` : bookTitle)
   const encodedQuery = encodeURIComponent(searchQuery)
   
   if (domain === 'goodreads') {

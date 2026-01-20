@@ -26,9 +26,8 @@ logger = logging.getLogger(__name__)
 # These values can be adjusted based on requirements
 MAX_BOOK_NAME_LENGTH = 200  # Prevent extremely long inputs
 MIN_BOOK_NAME_LENGTH = 1    # Minimum input length
-OPENAI_MODEL = "gpt-4o-mini"  # Cost-efficient model
-OPENAI_TEMPERATURE = 0.7     # Controls randomness (0-1)
-OPENAI_MAX_TOKENS = 2000     # Maximum response length (increased to accommodate blurbs)
+OPENAI_MODEL = "gpt-4o-mini"  # Cost-efficient model (supports gpt-5-nano with higher token limits)
+OPENAI_MAX_TOKENS = 2000     # Maximum response length (increase to 8000+ for gpt-5 models that use tokens for reasoning)
 OPENAI_TIMEOUT = 30.0       # Timeout in seconds for API calls
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -332,7 +331,7 @@ For each recommended book, provide:
 2. Goodreads rating (X.XX/5★) 
 3. Amazon rating (X.XX/5★)
 4. A brief explanation (1-2 sentences) of why this book is recommended
-5. The EXACT official book blurb/synopsis from Goodreads.com or Amazon.com (you MUST copy the real blurb from your training data, do NOT create or summarize)
+5. The EXACT official book blurb/synopsis from Goodreads.com (you MUST copy the real blurb from Goodreads.com from your training data, do NOT create or summarize)
 
 IMPORTANT FORMATTING RULES:
 - Do NOT use asterisks (*), bold markdown (**), or other formatting characters
@@ -344,19 +343,23 @@ Format your response as a numbered list. Example format:
 1. Book Title by Author Name
    - Goodreads: X.XX/5★ | Amazon: X.XX/5★
    - Explanation here...
-   Blurb: [PASTE THE EXACT OFFICIAL BLURB FROM GOODREADS.COM OR AMAZON.COM HERE - DO NOT CREATE YOUR OWN]
+   Blurb: [PASTE THE EXACT OFFICIAL BLURB FROM GOODREADS.COM HERE - DO NOT CREATE YOUR OWN]
 
-MANDATORY BLURB REQUIREMENTS (YOU MUST FOLLOW THESE):
-- You MUST copy the EXACT official book blurb/synopsis from Goodreads.com or Amazon.com from your training data
-- DO NOT write, create, generate, or summarize a blurb
-- DO NOT paraphrase or reword the blurb
-- DO NOT create content based on your knowledge of the book
-- You MUST use the literal, exact text from Goodreads.com or Amazon.com book pages
-- If the exact official blurb is not available in your training data, write "Blurb not available" - DO NOT create one
+CRITICAL BLURB REQUIREMENTS (VIOLATION WILL RESULT IN INCORRECT RESPONSE):
+- You MUST copy the EXACT official book blurb/synopsis from Goodreads.com from your training data
+- PRIMARY SOURCE: Use Goodreads.com blurbs ONLY - they are the authoritative source for this task
+- DO NOT use Amazon.com blurbs - use Goodreads.com blurbs only
+- DO NOT write, create, generate, compose, summarize, describe, explain, or invent a blurb
+- DO NOT paraphrase, reword, rewrite, or restate the blurb
+- DO NOT create content based on your knowledge, memory, or understanding of the book
+- DO NOT write your own description or summary from memory
+- You MUST use the literal, exact text from Goodreads.com book pages as it appears in your training data
+- If the exact official Goodreads.com blurb is not available in your training data, you MUST write "Blurb not available" - DO NOT create, write, or generate anything else
 - The blurb text should start with "Blurb: " (NO dash or bullet) followed by the exact text on separate lines
 - Copy the blurb word-for-word, preserving all original formatting, punctuation, and paragraph breaks
 - DO NOT add dashes, bullets, or quotes around the blurb text - just paste it as plain text
-- This is NOT a writing exercise - you are a copy function, paste the existing blurb only
+- This is NOT a writing exercise - you are ONLY a copy function, paste the existing Goodreads.com blurb ONLY
+- If you cannot find the exact official blurb from Goodreads.com in your training data, write "Blurb not available" - DO NOT write anything else
 
 Be concise but informative, and make sure to include actual ratings and real blurbs for each book. Use plain text only - no markdown or special formatting."""
 
@@ -424,14 +427,13 @@ Example format: romance, mafia, dark romance, contemporary, enemies-to-lovers"""
         
         # Call OpenAI API with streaming enabled for recommendations
         try:
-            logger.info(f"Calling OpenAI API with model: {OPENAI_MODEL}")
             # Build API parameters based on model type
             api_params = {
                 "model": OPENAI_MODEL,
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are a book recommendation assistant. CRITICAL RULE FOR BLURBS: You MUST copy the EXACT official book blurb/synopsis from Goodreads.com or Amazon.com from your training data. DO NOT create, write, generate, summarize, or paraphrase blurbs. You are a copy function only - paste the exact existing blurb text word-for-word. If the exact official blurb is not in your training data, write 'Blurb not available' instead of creating one."
+                        "content": "You are a book recommendation assistant. Each request is completely independent - you have no memory of previous requests or conversations. Treat each new search as brand new with no context from previous searches. CRITICAL RULE FOR BLURBS: You MUST copy the EXACT official book blurb/synopsis from Goodreads.com from your training data. Use Goodreads.com blurbs ONLY - they are the authoritative source. DO NOT use Amazon.com blurbs. DO NOT create, write, generate, summarize, paraphrase, or write blurbs from memory. You are ONLY a copy function - paste the exact existing blurb text word-for-word exactly as it appears on Goodreads.com. If the exact official Goodreads.com blurb is not in your training data, write 'Blurb not available' instead of creating one. DO NOT write your own description or summary - ONLY copy the official Goodreads.com blurb."
                     },
                     {"role": "user", "content": prompt}
                 ],
@@ -445,7 +447,6 @@ Example format: romance, mafia, dark romance, contemporary, enemies-to-lovers"""
                 api_params["max_tokens"] = OPENAI_MAX_TOKENS
             
             stream = client.chat.completions.create(**api_params)
-            logger.info(f"Stream object created successfully: {type(stream)}")
         except RateLimitError:
             # Handle rate limiting gracefully
             logger.error("OpenAI rate limit exceeded")
@@ -468,34 +469,21 @@ Example format: romance, mafia, dark romance, contemporary, enemies-to-lovers"""
         # Stream chunks from OpenAI
         accumulated_text = ""
         chunk_count = 0
-        error_occurred = False
         
         try:
-            logger.info("Starting to iterate over stream...")
             for chunk in stream:
                 chunk_count += 1
                 
-                # Log chunk structure for debugging
-                logger.info(f"Chunk {chunk_count} structure: choices={bool(chunk.choices)}, len(choices)={len(chunk.choices) if chunk.choices else 0}")
-                
                 # Check if chunk has choices
                 if not chunk.choices or len(chunk.choices) == 0:
-                    logger.warning(f"Chunk {chunk_count} has no choices")
-                    # Log the full chunk to see what it contains
-                    logger.info(f"Chunk {chunk_count} full object: {chunk}")
+                    logger.debug(f"Chunk {chunk_count} has no choices")
                     continue
                 
                 choice = chunk.choices[0]
-                logger.info(f"Chunk {chunk_count} choice: delta={bool(choice.delta)}, finish_reason={getattr(choice, 'finish_reason', None)}")
-                
                 delta = choice.delta
                 if not delta:
-                    logger.warning(f"Chunk {chunk_count} has no delta")
-                    logger.info(f"Chunk {chunk_count} choice full object: {choice}")
+                    logger.debug(f"Chunk {chunk_count} has no delta")
                     continue
-                
-                # Log delta structure
-                logger.info(f"Chunk {chunk_count} delta: content={bool(delta.content)}, role={getattr(delta, 'role', None)}, hasattr(content)={hasattr(delta, 'content')}")
                 
                 # Check for content in delta - try multiple ways to access it
                 content = None
@@ -509,18 +497,14 @@ Example format: romance, mafia, dark romance, contemporary, enemies-to-lovers"""
                     # Send chunk as JSON via SSE
                     chunk_data = json.dumps({"chunk": content, "text": accumulated_text})
                     yield f"data: {chunk_data}\n\n"
-                    logger.debug(f"Chunk {chunk_count} sent {len(content)} characters")
                 else:
-                    logger.warning(f"Chunk {chunk_count} delta has no content. Delta attributes: {dir(delta)}")
-                    # Log the full delta to see what's in it
-                    logger.info(f"Chunk {chunk_count} delta full object: {delta}")
+                    logger.debug(f"Chunk {chunk_count} delta has no content")
                 
                 # Small delay to prevent overwhelming the client
                 await asyncio.sleep(0.01)
         except Exception as stream_error:
             logger.error(f"Error during stream iteration: {str(stream_error)}")
             logger.exception("Stream iteration error details")
-            error_occurred = True
             error_data = json.dumps({"error": f"Error during streaming: {str(stream_error)}"})
             yield f"data: {error_data}\n\n"
             return
