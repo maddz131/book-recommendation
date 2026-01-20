@@ -1,15 +1,23 @@
 /**
  * RecommendationsDisplay Component
  * 
- * Displays the formatted book recommendations.
+ * Displays the formatted book recommendations with expand/collapse functionality.
+ * Updates in real-time as streaming content arrives.
  * 
  * @param {string} recommendations - Recommendations text to display
  * @param {Array<string>} selectedTags - Currently selected tags for filtering
- * @param {Function} formatRecommendations - Function to format recommendations text
+ * @param {boolean} loading - Whether recommendations are currently loading/streaming
  */
 
-function RecommendationsDisplay({ recommendations, selectedTags, formatRecommendations }) {
-  if (!recommendations) return null
+import BookItem from './BookItem'
+import { parseRecommendations } from '../utils/recommendationFormatter'
+
+function RecommendationsDisplay({ recommendations, selectedTags, loading }) {
+  if (!recommendations && !loading) return null
+
+  // Parse recommendations into structured book data
+  // This will re-parse as text arrives, showing books incrementally
+  const books = parseRecommendations(recommendations || '')
 
   return (
     <div className="recommendations">
@@ -21,8 +29,35 @@ function RecommendationsDisplay({ recommendations, selectedTags, formatRecommend
         </div>
       )}
       
+      {loading && recommendations && (
+        <div className="streaming-indicator">
+          <span className="streaming-dot"></span>
+          <span>Generating recommendations...</span>
+        </div>
+      )}
+      
       <div className="recommendations-content">
-        {formatRecommendations(recommendations)}
+        {books.length > 0 ? (
+          books.map((book, index) => (
+            <BookItem
+              key={`book-${index}-${book.title}`}
+              book={book}
+              bookIndex={index}
+            />
+          ))
+        ) : loading && !recommendations ? (
+          <div className="streaming-indicator">
+            <span className="streaming-dot"></span>
+            <span>Starting to generate recommendations...</span>
+          </div>
+        ) : null}
+        
+        {recommendations && loading && (
+          <div className="streaming-indicator streaming-footer">
+            <span className="streaming-dot"></span>
+            <span>More recommendations coming...</span>
+          </div>
+        )}
       </div>
     </div>
   )

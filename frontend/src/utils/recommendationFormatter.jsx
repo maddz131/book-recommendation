@@ -1,10 +1,7 @@
 /**
  * Recommendation Formatter Utility
  * 
- * Formats recommendations text into React elements with clickable rating links.
- * 
- * @param {string} text - The recommendations text from the API
- * @returns {Array} - Array of React elements to render
+ * Formats recommendations text into structured data with clickable rating links.
  */
 
 import React from 'react'
@@ -67,11 +64,58 @@ function createSearchUrl(domain, bookTitle, bookAuthor) {
 }
 
 /**
+ * Extracts and formats ratings with clickable links
+ */
+export function extractRatings(details, bookTitle, bookAuthor) {
+  const ratings = {
+    goodreads: null,
+    amazon: null
+  }
+  
+  // Look for rating lines in details
+  for (const detail of details) {
+    // Match Goodreads rating (with or without stars symbol)
+    const goodreadsMatch = detail.match(/Goodreads:\s*([\d.]+)\/5\s*(?:★|star|stars)?/i)
+    if (goodreadsMatch && !ratings.goodreads) {
+      const rawValue = parseFloat(goodreadsMatch[1])
+      const ratingValue = isNaN(rawValue) ? goodreadsMatch[1] : rawValue.toFixed(1)
+      ratings.goodreads = {
+        value: ratingValue,
+        display: `Goodreads: ${ratingValue}/5★`,
+        url: createSearchUrl('goodreads', bookTitle, bookAuthor)
+      }
+    }
+    
+    // Match Amazon rating (with or without stars symbol)
+    const amazonMatch = detail.match(/Amazon:\s*([\d.]+)\/5\s*(?:★|star|stars)?/i)
+    if (amazonMatch && !ratings.amazon) {
+      const rawValue = parseFloat(amazonMatch[1])
+      const ratingValue = isNaN(rawValue) ? amazonMatch[1] : rawValue.toFixed(1)
+      ratings.amazon = {
+        value: ratingValue,
+        display: `Amazon: ${ratingValue}/5★`,
+        url: createSearchUrl('amazon', bookTitle, bookAuthor)
+      }
+    }
+  }
+  
+  return ratings
+}
+
+/**
  * Formats a rating line with clickable links
  */
 function formatRatingLine(line, bookTitle, bookAuthor) {
-  // Replace "stars" with star symbol
-  let formattedLine = line.replace(/\bstars\b/gi, '★').replace(/\bstar\b/gi, '★')
+  // Only replace "stars" with star symbol in rating patterns
+  let formattedLine = line
+  
+  // Replace stars only in rating context (e.g., "4.5/5 stars" or "Goodreads: 4.5/5 star")
+  formattedLine = formattedLine.replace(/(Goodreads|Amazon):\s*([\d.]+\/5)\s*(?:stars?|★)/gi, (match, platform, rating) => {
+    return `${platform}: ${rating}★`
+  })
+  
+  // Also handle standalone rating patterns
+  formattedLine = formattedLine.replace(/([\d.]+\/5)\s*(?:stars?)\b/gi, '$1★')
   
   // Check if this line contains ratings
   const goodreadsMatch = formattedLine.match(/(Goodreads:\s*[\d.]+\/5★?)/i)
@@ -142,61 +186,139 @@ function formatRatingLine(line, bookTitle, bookAuthor) {
 }
 
 /**
- * Formats recommendations text into React elements
+ * Parses recommendations text into structured book data
  */
-export function formatRecommendations(text) {
+export function parseRecommendations(text) {
   if (!text) return []
 
   const lines = text.split('\n')
-  const elements = []
-  let currentBookIndex = 0
-  let currentBookTitle = ''
-  let currentBookAuthor = ''
+  const books = []
+  let currentBook = null
+  let blurbStarted = false
+  let blurbLines = []
 
-  lines.forEach((line, index) => {
+  lines.forEach((line) => {
     const trimmedLine = line.trim()
     
     // Skip empty lines
-    if (!trimmedLine) return
+    if (!trimmedLine) {
+      // Empty line might indicate end of blurb or separation
+      if (blurbStarted && blurbLines.length > 0) {
+        // Continue collecting blurb (empty lines are part of paragraph breaks)
+        blurbLines.push('')
+      }
+      return
+    }
     
     // Clean markdown formatting
     const cleanedLine = cleanMarkdown(trimmedLine)
     
-    // Replace "stars" with star symbol
-    let formattedLine = cleanedLine.replace(/\bstars\b/gi, '★').replace(/\bstar\b/gi, '★')
+    // Don't replace stars here - only in rating displays
+    let formattedLine = cleanedLine
     
     // Check if line is a numbered list item (starts with number followed by period)
     const isNumberedItem = /^\d+\./.test(formattedLine)
     
+    // Check if this line starts the blurb section - multiple patterns to match
+    const isBlurbStart = /^[-•]\s*[Bb]lurb\s*:?\s*/i.test(formattedLine) || 
+                         /^[Bb]lurb\s*:?\s*/i.test(formattedLine) ||
+                         /^-\s*[Bb]lurb/i.test(formattedLine)
+    
+    // Check if line looks like part of a blurb (long text without rating keywords)
+    const looksLikeBlurbContent = formattedLine.length > 80 && 
+                                   !formattedLine.match(/Goodreads:|Amazon:|rating|^\d+\./i) &&
+                                   !formattedLine.match(/^[-•]\s*(Goodreads|Amazon)/i)
+    
     if (isNumberedItem) {
-      // Start a new book recommendation group
-      currentBookIndex++
+      // Save previous book if it exists
+      if (currentBook) {
+        // Add accumulated blurb if any
+        if (blurbLines.length > 0) {
+          currentBook.blurb = blurbLines.join('\n\n').trim()
+        }
+        books.push(currentBook)
+      }
+      
+      // Start a new book
       const bookInfo = extractBookInfo(formattedLine)
-      currentBookTitle = bookInfo.title
-      currentBookAuthor = bookInfo.author
-      
-      elements.push(
-        <p
-          key={`book-${currentBookIndex}`}
-          className="recommendation-item"
-        >
-          {formattedLine}
-        </p>
-      )
-    } else {
-      // This is part of the current book's details (ratings, explanation, etc.)
-      const ratingContent = formatRatingLine(formattedLine, currentBookTitle, currentBookAuthor)
-      
-      elements.push(
-        <p
-          key={`detail-${index}`}
-          className="recommendation-text"
-        >
-          {ratingContent}
-        </p>
-      )
+      currentBook = {
+        title: bookInfo.title,
+        author: bookInfo.author,
+        formattedTitle: formattedLine,
+        details: [],
+        blurb: ''
+      }
+      blurbStarted = false
+      blurbLines = []
+    } else if (currentBook) {
+      if (isBlurbStart) {
+        // Blurb section starts - extract text after "Blurb:" or "Blurb"
+        blurbStarted = true
+        let blurbText = formattedLine
+          .replace(/^[-•]\s*[Bb]lurb\s*:?\s*/i, '')
+          .replace(/^[Bb]lurb\s*:?\s*/i, '')
+        // Remove surrounding quotes (both single and double)
+        blurbText = blurbText.replace(/^["'](.*)["']$/g, '$1')
+        // Remove quotes at start or end
+        blurbText = blurbText.replace(/^["']+|["']+$/g, '')
+        blurbText = blurbText.trim()
+        if (blurbText) {
+          blurbLines.push(blurbText)
+        }
+      } else if (blurbStarted) {
+        // Continue collecting blurb lines
+        // Stop if we hit the next numbered item or a detail line that looks like ratings
+        if (/^\d+\./.test(formattedLine) || formattedLine.match(/^[-•]\s*(Goodreads|Amazon)/i)) {
+          // End of blurb, start of next book or detail
+          blurbStarted = false
+          currentBook.details.push(formattedLine)
+        } else {
+          // Clean up dashes, bullets, and quotes from blurb lines
+          let cleanedLine = formattedLine
+          // Remove leading dashes/bullets
+          cleanedLine = cleanedLine.replace(/^[-•]\s+/, '')
+          // Remove surrounding quotes (both single and double)
+          cleanedLine = cleanedLine.replace(/^["'](.*)["']$/g, '$1')
+          // Remove quotes at start or end (handles cases where quotes wrap the text)
+          cleanedLine = cleanedLine.replace(/^["']+|["']+$/g, '')
+          blurbLines.push(cleanedLine.trim())
+        }
+      } else {
+        // This is part of the current book's details (ratings, explanation, etc.)
+        // If we already have at least 2 detail lines (ratings + explanation), 
+        // and this line looks like blurb content, treat it as blurb
+        if (looksLikeBlurbContent && currentBook.details.length >= 2 && !blurbStarted) {
+          // Likely a blurb if we have ratings and explanation already
+          blurbStarted = true
+          // Clean up dashes, bullets, and quotes from blurb lines
+          let cleanedLine = formattedLine
+          // Remove leading dashes/bullets
+          cleanedLine = cleanedLine.replace(/^[-•]\s+/, '')
+          // Remove surrounding quotes (both single and double)
+          cleanedLine = cleanedLine.replace(/^["'](.*)["']$/g, '$1')
+          // Remove quotes at start or end (handles cases where quotes wrap the text)
+          cleanedLine = cleanedLine.replace(/^["']+|["']+$/g, '')
+          blurbLines.push(cleanedLine.trim())
+        } else {
+          // Remove leading dash/bullet from explanation lines
+          const cleanedDetail = formattedLine.replace(/^[-•]\s+/, '').trim()
+          currentBook.details.push(cleanedDetail)
+        }
+      }
     }
   })
 
-  return elements
+  // Don't forget the last book
+  if (currentBook) {
+    // Add accumulated blurb if any
+    if (blurbLines.length > 0) {
+      currentBook.blurb = blurbLines.join('\n\n').trim()
+    }
+    books.push(currentBook)
+  }
+
+  return books
 }
+
+// Export formatRatingLine for use in components
+export { formatRatingLine }

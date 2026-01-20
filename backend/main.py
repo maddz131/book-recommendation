@@ -5,7 +5,9 @@ Uses OpenAI GPT to provide book recommendations based on user input.
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+import json
+import asyncio
 from pydantic import BaseModel, Field, field_validator
 from openai import OpenAI, APIError, APITimeoutError, RateLimitError
 import os
@@ -26,7 +28,7 @@ MAX_BOOK_NAME_LENGTH = 200  # Prevent extremely long inputs
 MIN_BOOK_NAME_LENGTH = 1    # Minimum input length
 OPENAI_MODEL = "gpt-4o-mini"  # Cost-efficient model
 OPENAI_TEMPERATURE = 0.7     # Controls randomness (0-1)
-OPENAI_MAX_TOKENS = 1200     # Maximum response length
+OPENAI_MAX_TOKENS = 2000     # Maximum response length (increased to accommodate blurbs)
 OPENAI_TIMEOUT = 30.0       # Timeout in seconds for API calls
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -177,11 +179,6 @@ class BookRequest(BaseModel):
         return validated_tags
 
 
-class BookResponse(BaseModel):
-    """Response model for book recommendations."""
-    recommendations: str
-
-
 class TagsRequest(BaseModel):
     """Request model for getting tags for a book/author."""
     
@@ -251,8 +248,8 @@ Example format: romance, mafia, dark romance, contemporary, enemies-to-lovers"""
                     },
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.5,  # Lower temperature for more consistent tag extraction
-                max_tokens=150
+                # Note: gpt-5 models only support temperature=1 (default), so we don't set it
+                max_completion_tokens=150
             )
         except (RateLimitError, APITimeoutError, APIError) as e:
             logger.error(f"OpenAI API error while fetching tags: {str(e)}")
@@ -335,6 +332,7 @@ For each recommended book, provide:
 2. Goodreads rating (X.XX/5★) 
 3. Amazon rating (X.XX/5★)
 4. A brief explanation (1-2 sentences) of why this book is recommended
+5. The EXACT official book blurb/synopsis from Goodreads.com or Amazon.com (you MUST copy the real blurb from your training data, do NOT create or summarize)
 
 IMPORTANT FORMATTING RULES:
 - Do NOT use asterisks (*), bold markdown (**), or other formatting characters
@@ -346,95 +344,255 @@ Format your response as a numbered list. Example format:
 1. Book Title by Author Name
    - Goodreads: X.XX/5★ | Amazon: X.XX/5★
    - Explanation here...
+   Blurb: [PASTE THE EXACT OFFICIAL BLURB FROM GOODREADS.COM OR AMAZON.COM HERE - DO NOT CREATE YOUR OWN]
 
-Be concise but informative, and make sure to include actual ratings for each book. Use plain text only - no markdown or special formatting."""
+MANDATORY BLURB REQUIREMENTS (YOU MUST FOLLOW THESE):
+- You MUST copy the EXACT official book blurb/synopsis from Goodreads.com or Amazon.com from your training data
+- DO NOT write, create, generate, or summarize a blurb
+- DO NOT paraphrase or reword the blurb
+- DO NOT create content based on your knowledge of the book
+- You MUST use the literal, exact text from Goodreads.com or Amazon.com book pages
+- If the exact official blurb is not available in your training data, write "Blurb not available" - DO NOT create one
+- The blurb text should start with "Blurb: " (NO dash or bullet) followed by the exact text on separate lines
+- Copy the blurb word-for-word, preserving all original formatting, punctuation, and paragraph breaks
+- DO NOT add dashes, bullets, or quotes around the blurb text - just paste it as plain text
+- This is NOT a writing exercise - you are a copy function, paste the existing blurb only
+
+Be concise but informative, and make sure to include actual ratings and real blurbs for each book. Use plain text only - no markdown or special formatting."""
 
 
-@app.post("/api/recommend", response_model=BookResponse)
-async def get_recommendations(request: BookRequest) -> BookResponse:
+async def _stream_recommendations(book_name: str, tags: list[str]):
+    """
+    Stream recommendations from OpenAI API.
+    
+    First fetches and sends tags, then streams book recommendations.
+    Generator function that yields chunks as they arrive.
+    """
+    try:
+        # Sanitize input for prompt injection prevention
+        sanitized_book_name = _sanitize_for_prompt(book_name)
+        
+        # Fetch tags first (only if not provided in request)
+        if not tags:
+            try:
+                tags_prompt = f"""Given the book or author "{sanitized_book_name}", provide a list of 5-10 relevant tags that describe this book/author's genre, themes, or characteristics.
+
+Examples of tags could include:
+- Genres: romance, fantasy, sci-fi, mystery, thriller, horror, historical fiction
+- Themes: mafia, military, coming-of-age, dystopian, paranormal, contemporary
+- Characteristics: dark romance, enemies-to-lovers, found family, heist
+
+Return ONLY a comma-separated list of tags. Do not include any explanation or formatting.
+Example format: romance, mafia, dark romance, contemporary, enemies-to-lovers"""
+                
+                tags_response = client.chat.completions.create(
+                    model=OPENAI_MODEL,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a helpful assistant that identifies book genres, themes, and characteristics."
+                        },
+                        {"role": "user", "content": tags_prompt}
+                    ],
+                    # Note: gpt-5 models only support temperature=1 (default), so we don't set it
+                    max_completion_tokens=150
+                )
+                
+                if tags_response.choices and tags_response.choices[0].message.content:
+                    tags_text = tags_response.choices[0].message.content.strip()
+                    # Parse tags from comma-separated response
+                    tags = [
+                        tag.strip().lower()
+                        for tag in tags_text.split(',')
+                        if tag.strip()
+                    ]
+                    # Limit to 10 tags maximum
+                    tags = tags[:10]
+                    
+                    # Send tags as first data in stream
+                    tags_data = json.dumps({"tags": tags})
+                    yield f"data: {tags_data}\n\n"
+                    
+                    logger.info(f"Generated {len(tags)} tags for: {book_name}")
+            except Exception as e:
+                # If tag fetching fails, continue without tags
+                logger.warning(f"Failed to fetch tags: {str(e)}")
+                tags = []
+        
+        # Build prompt using helper function
+        prompt = _build_prompt(sanitized_book_name, tags)
+        
+        # Call OpenAI API with streaming enabled for recommendations
+        try:
+            logger.info(f"Calling OpenAI API with model: {OPENAI_MODEL}")
+            # Build API parameters based on model type
+            api_params = {
+                "model": OPENAI_MODEL,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a book recommendation assistant. CRITICAL RULE FOR BLURBS: You MUST copy the EXACT official book blurb/synopsis from Goodreads.com or Amazon.com from your training data. DO NOT create, write, generate, summarize, or paraphrase blurbs. You are a copy function only - paste the exact existing blurb text word-for-word. If the exact official blurb is not in your training data, write 'Blurb not available' instead of creating one."
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                "stream": True  # Enable streaming
+            }
+            
+            # Use max_tokens for gpt-4/gpt-3.5 models, max_completion_tokens for gpt-5 models
+            if "gpt-5" in OPENAI_MODEL:
+                api_params["max_completion_tokens"] = OPENAI_MAX_TOKENS
+            else:
+                api_params["max_tokens"] = OPENAI_MAX_TOKENS
+            
+            stream = client.chat.completions.create(**api_params)
+            logger.info(f"Stream object created successfully: {type(stream)}")
+        except RateLimitError:
+            # Handle rate limiting gracefully
+            logger.error("OpenAI rate limit exceeded")
+            error_data = json.dumps({"error": "API rate limit exceeded. Please try again later."})
+            yield f"data: {error_data}\n\n"
+            return
+        except APITimeoutError:
+            # Handle timeout errors
+            logger.error("OpenAI API timeout")
+            error_data = json.dumps({"error": "Request timed out. Please try again."})
+            yield f"data: {error_data}\n\n"
+            return
+        except APIError as e:
+            # Handle other OpenAI API errors
+            logger.error(f"OpenAI API error: {str(e)}")
+            error_data = json.dumps({"error": "Error communicating with recommendation service. Please try again later."})
+            yield f"data: {error_data}\n\n"
+            return
+        
+        # Stream chunks from OpenAI
+        accumulated_text = ""
+        chunk_count = 0
+        error_occurred = False
+        
+        try:
+            logger.info("Starting to iterate over stream...")
+            for chunk in stream:
+                chunk_count += 1
+                
+                # Log chunk structure for debugging
+                logger.info(f"Chunk {chunk_count} structure: choices={bool(chunk.choices)}, len(choices)={len(chunk.choices) if chunk.choices else 0}")
+                
+                # Check if chunk has choices
+                if not chunk.choices or len(chunk.choices) == 0:
+                    logger.warning(f"Chunk {chunk_count} has no choices")
+                    # Log the full chunk to see what it contains
+                    logger.info(f"Chunk {chunk_count} full object: {chunk}")
+                    continue
+                
+                choice = chunk.choices[0]
+                logger.info(f"Chunk {chunk_count} choice: delta={bool(choice.delta)}, finish_reason={getattr(choice, 'finish_reason', None)}")
+                
+                delta = choice.delta
+                if not delta:
+                    logger.warning(f"Chunk {chunk_count} has no delta")
+                    logger.info(f"Chunk {chunk_count} choice full object: {choice}")
+                    continue
+                
+                # Log delta structure
+                logger.info(f"Chunk {chunk_count} delta: content={bool(delta.content)}, role={getattr(delta, 'role', None)}, hasattr(content)={hasattr(delta, 'content')}")
+                
+                # Check for content in delta - try multiple ways to access it
+                content = None
+                if hasattr(delta, 'content'):
+                    content = delta.content
+                elif hasattr(delta, 'text'):
+                    content = delta.text
+                
+                if content:
+                    accumulated_text += content
+                    # Send chunk as JSON via SSE
+                    chunk_data = json.dumps({"chunk": content, "text": accumulated_text})
+                    yield f"data: {chunk_data}\n\n"
+                    logger.debug(f"Chunk {chunk_count} sent {len(content)} characters")
+                else:
+                    logger.warning(f"Chunk {chunk_count} delta has no content. Delta attributes: {dir(delta)}")
+                    # Log the full delta to see what's in it
+                    logger.info(f"Chunk {chunk_count} delta full object: {delta}")
+                
+                # Small delay to prevent overwhelming the client
+                await asyncio.sleep(0.01)
+        except Exception as stream_error:
+            logger.error(f"Error during stream iteration: {str(stream_error)}")
+            logger.exception("Stream iteration error details")
+            error_occurred = True
+            error_data = json.dumps({"error": f"Error during streaming: {str(stream_error)}"})
+            yield f"data: {error_data}\n\n"
+            return
+        
+        # Log stream statistics
+        logger.info(f"Stream completed: {chunk_count} chunks processed, {len(accumulated_text)} characters accumulated for: {book_name}")
+        
+        if not accumulated_text:
+            logger.warning(f"No content accumulated from stream for: {book_name}. Chunks processed: {chunk_count}")
+            if chunk_count == 0:
+                error_msg = f"No chunks received from API. Model '{OPENAI_MODEL}' may not exist or may not support streaming. Please check the model name and try again."
+                logger.error(error_msg)
+                error_data = json.dumps({"error": error_msg})
+                yield f"data: {error_data}\n\n"
+                return
+            else:
+                error_msg = f"Received {chunk_count} chunks but no content. The model may have returned an empty response."
+                logger.error(error_msg)
+                error_data = json.dumps({"error": error_msg})
+                yield f"data: {error_data}\n\n"
+                return
+        
+        # Send final completion signal
+        completion_data = json.dumps({"done": True, "text": accumulated_text})
+        yield f"data: {completion_data}\n\n"
+        
+        logger.info(f"Successfully streamed recommendations for: {book_name}")
+    
+    except Exception as e:
+        # Catch-all for unexpected errors
+        logger.exception("Unexpected error in streaming recommendations")
+        error_data = json.dumps({"error": "An unexpected error occurred. Please try again later."})
+        yield f"data: {error_data}\n\n"
+
+
+@app.post("/api/recommend")
+async def get_recommendations(request: BookRequest):
     """
     Get book recommendations based on a book name and optional tags.
+    Returns a streaming response with recommendations as they are generated.
     
     Args:
         request: BookRequest containing the book name and optional tags
-        
+    
     Returns:
-        BookResponse with recommendations string
+        StreamingResponse with Server-Sent Events (SSE) containing recommendation chunks
         
     Raises:
-        HTTPException: If there's an error processing the request
+        HTTPException: If there's a validation error
     """
     try:
         # Log request (truncate for privacy)
         log_name = request.book_name[:50] + ('...' if len(request.book_name) > 50 else '')
         logger.info(f"Recommendation request for: {log_name}, tags: {len(request.tags) if request.tags else 0}")
         
-        # Sanitize input for prompt injection prevention
-        sanitized_book_name = _sanitize_for_prompt(request.book_name)
-        
-        # Build prompt using helper function
-        prompt = _build_prompt(sanitized_book_name, request.tags)
-
-        # Call OpenAI API with error handling for specific error types
-        try:
-            response = client.chat.completions.create(
-                model=OPENAI_MODEL,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a helpful book recommendation assistant that provides thoughtful book suggestions based on user preferences."
-                    },
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=OPENAI_TEMPERATURE,
-                max_tokens=OPENAI_MAX_TOKENS
-            )
-        except RateLimitError:
-            # Handle rate limiting gracefully
-            logger.error("OpenAI rate limit exceeded")
-            raise HTTPException(
-                status_code=429,
-                detail="API rate limit exceeded. Please try again later."
-            )
-        except APITimeoutError:
-            # Handle timeout errors
-            logger.error("OpenAI API timeout")
-            raise HTTPException(
-                status_code=504,
-                detail="Request timed out. Please try again."
-            )
-        except APIError as e:
-            # Handle other OpenAI API errors
-            logger.error(f"OpenAI API error: {str(e)}")
-            raise HTTPException(
-                status_code=502,
-                detail="Error communicating with recommendation service. Please try again later."
-            )
-        
-        # Extract recommendations from response
-        # Check if response is valid before accessing
-        if not response.choices or not response.choices[0].message.content:
-            logger.error("Invalid response from OpenAI API")
-            raise HTTPException(
-                status_code=502,
-                detail="Invalid response from recommendation service."
-            )
-        
-        recommendations = response.choices[0].message.content
-        logger.info(f"Successfully generated recommendations for: {request.book_name}")
-        
-        return BookResponse(recommendations=recommendations)
+        # Return streaming response
+        return StreamingResponse(
+            _stream_recommendations(request.book_name, request.tags),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"  # Disable nginx buffering
+            }
+        )
     
-    except HTTPException:
-        # Re-raise HTTP exceptions (already properly formatted)
-        raise
     except ValueError as e:
         # Handle validation errors
         logger.warning(f"Validation error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         # Catch-all for unexpected errors
-        # Log full error but don't expose internal details to client
         logger.exception("Unexpected error processing recommendation request")
         raise HTTPException(
             status_code=500,

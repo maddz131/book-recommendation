@@ -97,6 +97,19 @@ export function useTags() {
     setAvailableTags([])
   }, [])
 
+  /**
+   * Sets available tags directly (used when tags come from stream)
+   */
+  const setTagsFromStream = useCallback((tags) => {
+    // Validate tag content (basic security check)
+    const validTags = Array.isArray(tags)
+      ? tags
+          .filter(tag => typeof tag === 'string' && tag.length <= 50)
+          .slice(0, 20) // Limit to 20 tags
+      : []
+    setAvailableTags(validTags)
+  }, [])
+
   return {
     availableTags,
     selectedTags,
@@ -105,6 +118,7 @@ export function useTags() {
     toggleTag,
     clearSelectedTags,
     clearAvailableTags,
-    setSelectedTags
+    setSelectedTags,
+    setTagsFromStream
   }
 }

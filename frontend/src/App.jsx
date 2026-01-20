@@ -5,7 +5,8 @@
  * Uses custom hooks and components for better code organization.
  */
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
+import React from 'react'
 import './App.css'
 import Header from './components/Header'
 import SearchForm from './components/SearchForm'
@@ -14,7 +15,7 @@ import ErrorMessage from './components/ErrorMessage'
 import RecommendationsDisplay from './components/RecommendationsDisplay'
 import { useBookRecommendations } from './hooks/useBookRecommendations'
 import { useTags } from './hooks/useTags'
-import { formatRecommendations } from './utils/recommendationFormatter'
+// No need to import these - RecommendationsDisplay handles it internally
 
 // Configuration constants
 const MAX_BOOK_NAME_LENGTH = 200
@@ -25,7 +26,19 @@ function App() {
 
   // Custom hooks for recommendations and tags
   const tagsHook = useTags()
-  const recommendations = useBookRecommendations(tagsHook.fetchTags)
+  const recommendations = useBookRecommendations()
+  
+  // Update available tags when tags come from stream
+  useEffect(() => {
+    if (recommendations.tagsFromStream && recommendations.tagsFromStream.length > 0) {
+      // Only update if tags are different to avoid unnecessary re-renders
+      const currentTags = tagsHook.availableTags.map(t => t.toLowerCase()).sort().join(',')
+      const newTags = recommendations.tagsFromStream.map(t => t.toLowerCase()).sort().join(',')
+      if (currentTags !== newTags) {
+        tagsHook.setTagsFromStream(recommendations.tagsFromStream)
+      }
+    }
+  }, [recommendations.tagsFromStream, tagsHook.availableTags, tagsHook.setTagsFromStream])
 
   /**
    * Handles input changes with validation
@@ -135,11 +148,11 @@ function App() {
 
         <ErrorMessage error={recommendations.error} />
 
-        <RecommendationsDisplay
-          recommendations={recommendations.recommendations}
-          selectedTags={tagsHook.selectedTags}
-          formatRecommendations={formatRecommendations}
-        />
+              <RecommendationsDisplay
+                recommendations={recommendations.recommendations}
+                selectedTags={tagsHook.selectedTags}
+                loading={recommendations.loading}
+              />
       </div>
     </div>
   )
