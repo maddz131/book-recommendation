@@ -1,0 +1,373 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 2rem 1rem;
+}
+
+.container {
+  max-width: 900px;
+  width: 100%;
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  padding: 3rem;
+  margin-top: 2rem;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+
+.header h1 {
+  font-size: 2.5rem;
+  color: #333;
+  margin-bottom: 0.5rem;
+  font-weight: 700;
+}
+
+.header p {
+  font-size: 1.1rem;
+  color: #666;
+  font-weight: 400;
+}
+
+.search-form {
+  margin-bottom: 2rem;
+}
+
+.char-count {
+  font-size: 0.85rem;
+  color: #888;
+  text-align: right;
+  margin-top: 0.5rem;
+}
+
+/* Tags Section Styles */
+.tags-section {
+  margin-top: 1.5rem;
+  margin-bottom: 2rem;
+  padding: 1.5rem;
+  background-color: #f8f9fa;
+  border-radius: 12px;
+  border: 1px solid #e0e0e0;
+}
+
+.tags-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.tags-header h3 {
+  font-size: 1.1rem;
+  color: #333;
+  font-weight: 600;
+  margin: 0;
+}
+
+.tags-loading {
+  font-size: 0.9rem;
+  color: #666;
+  font-style: italic;
+}
+
+.tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.tag-checkbox {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.tag-checkbox input[type="checkbox"] {
+  margin-right: 0.5rem;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #667eea;
+}
+
+.tag-checkbox input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.tag-label {
+  padding: 0.5rem 1rem;
+  background-color: white;
+  border: 2px solid #e0e0e0;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  color: #555;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.tag-checkbox input[type="checkbox"]:checked + .tag-label {
+  background-color: #667eea;
+  color: white;
+  border-color: #667eea;
+  font-weight: 500;
+}
+
+.tag-checkbox:hover .tag-label:not(.tag-checkbox input[type="checkbox"]:disabled + .tag-label) {
+  border-color: #667eea;
+  transform: translateY(-1px);
+}
+
+.selected-tags-info {
+  font-size: 0.85rem;
+  color: #666;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e0e0e0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.apply-tags-button {
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.apply-tags-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+}
+
+.apply-tags-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.filter-info {
+  font-size: 0.9rem;
+  color: #666;
+  margin-bottom: 1rem;
+  padding: 0.5rem 1rem;
+  background-color: #e8eaf6;
+  border-radius: 8px;
+  border-left: 3px solid #667eea;
+}
+
+.search-container {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 250px;
+  padding: 1rem 1.5rem;
+  font-size: 1rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 12px;
+  outline: none;
+  transition: all 0.3s ease;
+}
+
+.search-input:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.search-input:disabled {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+}
+
+.search-button {
+  padding: 1rem 2rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+}
+
+.search-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+}
+
+.search-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.search-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.error-message {
+  background-color: #fee;
+  border: 1px solid #fcc;
+  color: #c33;
+  padding: 1rem;
+  border-radius: 12px;
+  margin-bottom: 2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.recommendations {
+  margin-top: 2rem;
+}
+
+.recommendations h2 {
+  font-size: 1.8rem;
+  color: #333;
+  margin-bottom: 1.5rem;
+  font-weight: 600;
+}
+
+.recommendations-content {
+  background-color: #f9f9f9;
+  border-radius: 12px;
+  padding: 0;
+  line-height: 1.7;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Each book recommendation as a grouped unit */
+.recommendation-item {
+  padding: 1.5rem 2rem 0.75rem 2rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #2c3e50;
+  margin: 0;
+  /* No border - use padding for separation instead */
+}
+
+.recommendation-item:not(:first-child) {
+  /* Add subtle separator only between different books */
+  border-top: 1px solid #e5e5e5;
+  padding-top: 1.75rem;
+}
+
+/* Text lines that are part of the same book recommendation */
+.recommendation-text {
+  margin: 0;
+  padding: 0 2rem;
+  color: #555;
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+/* First detail line after a book title should have minimal top margin */
+.recommendation-item + .recommendation-text {
+  margin-top: 0.5rem;
+  padding-top: 0;
+}
+
+/* Subsequent detail lines within the same recommendation */
+.recommendation-text + .recommendation-text {
+  margin-top: 0.4rem;
+}
+
+/* Last detail line of each book should have bottom padding */
+.recommendation-text:last-child,
+.recommendation-item:last-child {
+  padding-bottom: 1.5rem;
+}
+
+/* Spacing before a new book recommendation */
+.recommendation-text + .recommendation-item {
+  margin-top: 0;
+}
+
+/* Rating links styling */
+.rating-link {
+  color: #667eea;
+  text-decoration: none;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  border-bottom: 1px solid transparent;
+}
+
+.rating-link:hover {
+  color: #764ba2;
+  border-bottom-color: #764ba2;
+  text-decoration: none;
+}
+
+.rating-link:active {
+  color: #5568d3;
+}
+
+@media (max-width: 768px) {
+  .container {
+    padding: 2rem 1.5rem;
+  }
+
+  .header h1 {
+    font-size: 2rem;
+  }
+
+  .search-container {
+    flex-direction: column;
+  }
+
+  .search-input {
+    min-width: 100%;
+  }
+
+  .search-button {
+    width: 100%;
+  }
+
+  .tags-section {
+    padding: 1rem;
+  }
+
+  .tags-container {
+    gap: 0.5rem;
+  }
+
+  .tag-label {
+    font-size: 0.85rem;
+    padding: 0.4rem 0.8rem;
+  }
+}
