@@ -9,6 +9,9 @@ A beautiful web application that recommends books based on your preferences usin
 - 🚀 Fast API backend using FastAPI
 - 🤖 Powered by OpenAI GPT models
 
+  <img width="1666" height="978" alt="Screenshot 2026-01-19 190625" src="https://github.com/user-attachments/assets/63dc491b-086d-45fe-b4a4-1d7b7ed493c9" />
+
+
 ## Project Structure
 
 ```
