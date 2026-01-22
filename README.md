@@ -20,7 +20,18 @@ A modern web application that recommends books based on your preferences using O
 ```
 book-reccomendation/
 ├── backend/                    # Python FastAPI backend
-│   ├── main.py                # Main API server with streaming support
+│   ├── main.py                # FastAPI app initialization and entry point
+│   ├── config.py              # Configuration constants and environment setup
+│   ├── models.py              # Pydantic request/response models
+│   ├── routers/               # API endpoint routers
+│   │   ├── __init__.py
+│   │   ├── recommendations.py # /api/recommend endpoint with streaming
+│   │   └── tags.py            # /api/tags endpoint
+│   ├── services/              # Business logic services
+│   │   ├── __init__.py
+│   │   ├── openai_service.py  # OpenAI client initialization
+│   │   ├── prompt_service.py  # Prompt building and sanitization utilities
+│   │   └── error_handler.py   # Centralized API error handling
 │   ├── requirements.txt       # Python dependencies
 │   └── .env.example           # Example environment file
 └── frontend/                  # React frontend
@@ -168,7 +179,7 @@ Get streaming book recommendations based on a book name and optional tags.
 
 ### Model Selection
 
-The app uses `gpt-4o-mini` by default for cost efficiency. To use a different model, edit `backend/main.py`:
+The app uses `gpt-4o-mini` by default for cost efficiency. To use a different model, edit `backend/config.py`:
 
 ```python
 OPENAI_MODEL = "gpt-4o-mini"  # Change to "gpt-5-nano" or other models
@@ -178,7 +189,7 @@ OPENAI_MODEL = "gpt-4o-mini"  # Change to "gpt-5-nano" or other models
 
 ### Token Limits
 
-Adjust `OPENAI_MAX_TOKENS` in `backend/main.py` based on your needs:
+Adjust `OPENAI_MAX_TOKENS` in `backend/config.py` based on your needs:
 - **gpt-4o-mini**: 2000 tokens (default)
 - **gpt-5 models**: 8000+ tokens (recommended, as they use tokens for reasoning)
 
@@ -197,12 +208,16 @@ Adjust `OPENAI_MAX_TOKENS` in `backend/main.py` based on your needs:
 
 ## Best Practices Implemented
 
-- **Code Organization**: Modular React components and custom hooks
-- **Error Handling**: Comprehensive error handling on both frontend and backend
+- **Code Organization**: 
+  - Modular React components and custom hooks (frontend)
+  - Separation of concerns with routers, services, and models (backend)
+  - Centralized error handling and configuration management
+- **Error Handling**: Comprehensive error handling on both frontend and backend with centralized error handler service
 - **Performance**: Real-time streaming for better UX, debounced inputs where appropriate
 - **Accessibility**: ARIA labels and semantic HTML
 - **Security**: Input validation, sanitization, and secure API key handling
 - **Stateless**: Each request is independent with no memory of previous searches
+- **Maintainability**: Clean architecture with single responsibility principle
 
 ## Troubleshooting
 
