@@ -9,15 +9,18 @@
  * @param {boolean} loading - Whether recommendations are currently loading/streaming
  */
 
+import { useMemo, memo } from 'react'
 import BookItem from './BookItem'
 import { parseRecommendations } from '../utils/recommendationFormatter'
 
 function RecommendationsDisplay({ recommendations, selectedTags, loading }) {
-  if (!recommendations && !loading) return null
+  // Memoize expensive parsing operation
+  const books = useMemo(
+    () => parseRecommendations(recommendations || ''),
+    [recommendations]
+  )
 
-  // Parse recommendations into structured book data
-  // This will re-parse as text arrives, showing books incrementally
-  const books = parseRecommendations(recommendations || '')
+  if (!recommendations && !loading) return null
 
   return (
     <div className="recommendations">
@@ -63,4 +66,10 @@ function RecommendationsDisplay({ recommendations, selectedTags, loading }) {
   )
 }
 
-export default RecommendationsDisplay
+export default memo(RecommendationsDisplay, (prevProps, nextProps) => {
+  return (
+    prevProps.recommendations === nextProps.recommendations &&
+    prevProps.selectedTags === nextProps.selectedTags &&
+    prevProps.loading === nextProps.loading
+  )
+})

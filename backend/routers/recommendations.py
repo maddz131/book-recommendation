@@ -5,18 +5,30 @@ Recommendations endpoint router.
 import json
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from models import BookRequest
 from services.openai_service import client
 from services.prompt_service import build_recommendation_prompt, sanitize_for_prompt, build_tags_prompt
 from services.error_handler import APIErrorHandler
+from services.cache_service import get_cached, set_cached
+from services.database_service import save_recommendations, log_search
 from config import OPENAI_MODEL, OPENAI_MAX_TOKENS
 from openai import APIError, APITimeoutError, RateLimitError
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["recommendations"])
+
+# Rate limiting decorator (if available)
+try:
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+    limiter = Limiter(key_func=get_remote_address)
+    RATE_LIMITING_AVAILABLE = True
+except ImportError:
+    limiter = None
+    RATE_LIMITING_AVAILABLE = False
 
 
 async def _stream_recommendations(book_name: str, tags: list[str]):
@@ -157,6 +169,14 @@ async def _stream_recommendations(book_name: str, tags: list[str]):
         completion_data = json.dumps({"done": True, "text": accumulated_text})
         yield f"data: {completion_data}\n\n"
         
+        # Cache the results for future requests
+        try:
+            set_cached(book_name, tags, accumulated_text)  # Uses default TTL from config
+            # Also save to database for analytics
+            save_recommendations(book_name, tags, accumulated_text)
+        except Exception as cache_error:
+            logger.warning(f"Failed to cache recommendations: {str(cache_error)}")
+        
         logger.info(f"Successfully streamed recommendations for: {book_name}")
     
     except Exception as e:
@@ -164,14 +184,31 @@ async def _stream_recommendations(book_name: str, tags: list[str]):
         yield APIErrorHandler.handle_unexpected_error(e, "streaming recommendations")
 
 
+def _create_cached_stream(cached_text: str):
+    """Create a streaming response from cached text."""
+    # Send tags if available (would need to extract from cached text or store separately)
+    # For now, just send the cached text as if it was streamed
+    completion_data = json.dumps({"done": True, "text": cached_text})
+    yield f"data: {completion_data}\n\n"
+
+
+def _apply_rate_limit(func):
+    """Apply rate limiting decorator if available."""
+    if RATE_LIMITING_AVAILABLE and limiter:
+        return limiter.limit("10/minute")(func)
+    return func
+
+
+@_apply_rate_limit
 @router.post("/recommend")
-async def get_recommendations(request: BookRequest):
+async def get_recommendations(request: BookRequest, http_request: Request):
     """
     Get book recommendations based on a book name and optional tags.
     Returns a streaming response with recommendations as they are generated.
     
     Args:
         request: BookRequest containing the book name and optional tags
+        http_request: FastAPI Request object for accessing client info
     
     Returns:
         StreamingResponse with Server-Sent Events (SSE) containing recommendation chunks
@@ -184,14 +221,37 @@ async def get_recommendations(request: BookRequest):
         log_name = request.book_name[:50] + ('...' if len(request.book_name) > 50 else '')
         logger.info(f"Recommendation request for: {log_name}, tags: {len(request.tags) if request.tags else 0}")
         
-        # Return streaming response
+        # Log search for analytics
+        try:
+            client_ip = http_request.client.host if http_request and http_request.client else None
+            log_search(request.book_name, request.tags, client_ip)
+        except Exception as log_error:
+            logger.warning(f"Failed to log search: {str(log_error)}")
+        
+        # Check cache first
+        cached_result = get_cached(request.book_name, request.tags)
+        if cached_result:
+            logger.info(f"Cache hit for: {log_name}")
+            return StreamingResponse(
+                _create_cached_stream(cached_result),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "public, max-age=3600",
+                    "Connection": "keep-alive",
+                    "X-Cache": "HIT"
+                }
+            )
+        
+        # Cache miss - generate new recommendations
+        logger.info(f"Cache miss for: {log_name}, generating new recommendations")
         return StreamingResponse(
             _stream_recommendations(request.book_name, request.tags),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "X-Accel-Buffering": "no"  # Disable nginx buffering
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+                "X-Cache": "MISS"
             }
         )
     

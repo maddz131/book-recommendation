@@ -5,15 +5,25 @@
  * Uses custom hooks and components for better code organization.
  */
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, lazy, Suspense, useMemo } from 'react'
 import './App.css'
 import Header from './components/Header'
 import SearchForm from './components/SearchForm'
 import TagsFilter from './components/TagsFilter'
 import ErrorMessage from './components/ErrorMessage'
-import RecommendationsDisplay from './components/RecommendationsDisplay'
 import { useBookRecommendations } from './hooks/useBookRecommendations'
 import { useTags } from './hooks/useTags'
+
+// Lazy load RecommendationsDisplay for code splitting
+const RecommendationsDisplay = lazy(() => import('./components/RecommendationsDisplay'))
+
+// Loading fallback component
+const LoadingSpinner = () => (
+  <div className="streaming-indicator">
+    <span className="streaming-dot"></span>
+    <span>Loading...</span>
+  </div>
+)
 
 // Configuration constants
 const MAX_BOOK_NAME_LENGTH = 200
@@ -26,17 +36,22 @@ function App() {
   const tagsHook = useTags()
   const recommendations = useBookRecommendations()
   
-  // Update available tags when tags come from stream
-  useEffect(() => {
+  // Memoize tag comparison to avoid unnecessary re-renders
+  const tagsComparison = useMemo(() => {
     if (recommendations.tagsFromStream && recommendations.tagsFromStream.length > 0) {
-      // Only update if tags are different to avoid unnecessary re-renders
       const currentTags = tagsHook.availableTags.map(t => t.toLowerCase()).sort().join(',')
       const newTags = recommendations.tagsFromStream.map(t => t.toLowerCase()).sort().join(',')
-      if (currentTags !== newTags) {
-        tagsHook.setTagsFromStream(recommendations.tagsFromStream)
-      }
+      return currentTags !== newTags
     }
-  }, [recommendations.tagsFromStream, tagsHook.availableTags, tagsHook.setTagsFromStream])
+    return false
+  }, [recommendations.tagsFromStream, tagsHook.availableTags])
+  
+  // Update available tags when tags come from stream
+  useEffect(() => {
+    if (tagsComparison && recommendations.tagsFromStream && recommendations.tagsFromStream.length > 0) {
+      tagsHook.setTagsFromStream(recommendations.tagsFromStream)
+    }
+  }, [tagsComparison, recommendations.tagsFromStream, tagsHook.setTagsFromStream])
 
   /**
    * Handles input changes with validation
@@ -145,11 +160,13 @@ function App() {
 
         <ErrorMessage error={recommendations.error} />
 
-              <RecommendationsDisplay
-                recommendations={recommendations.recommendations}
-                selectedTags={tagsHook.selectedTags}
-                loading={recommendations.loading}
-              />
+        <Suspense fallback={<LoadingSpinner />}>
+          <RecommendationsDisplay
+            recommendations={recommendations.recommendations}
+            selectedTags={tagsHook.selectedTags}
+            loading={recommendations.loading}
+          />
+        </Suspense>
       </div>
     </div>
   )

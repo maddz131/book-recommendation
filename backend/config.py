@@ -49,5 +49,14 @@ if not OPENAI_API_KEY or not OPENAI_API_KEY.strip():
         "and contains: OPENAI_API_KEY=your_key_here"
     )
 
-# Remove any whitespace from API key (common issue)
-OPENAI_API_KEY = OPENAI_API_KEY.strip()
+# Redis configuration (optional)
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+
+# Cache configuration
+CACHE_DEFAULT_TTL = int(os.getenv("CACHE_DEFAULT_TTL", "3600"))  # 1 hour default
+CACHE_MAX_SIZE = int(os.getenv("CACHE_MAX_SIZE", "1000"))  # Max in-memory cache entries
+
+# Database configuration
+DB_MAX_RECOMMENDATION_LENGTH = int(os.getenv("DB_MAX_RECOMMENDATION_LENGTH", "100000"))  # Max chars for recommendations

@@ -8,7 +8,7 @@
  * @param {number} bookIndex - Index of the book in the list
  */
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, memo } from 'react'
 import './BookItem.css'
 import { extractRatings, formatRatingLine } from '../utils/recommendationFormatter'
 
@@ -161,4 +161,13 @@ function BookItem({ book, bookIndex }) {
   )
 }
 
-export default BookItem
+export default memo(BookItem, (prevProps, nextProps) => {
+  // Custom comparison function for memo
+  return (
+    prevProps.book.title === nextProps.book.title &&
+    prevProps.book.author === nextProps.book.author &&
+    prevProps.book.blurb === nextProps.book.blurb &&
+    prevProps.book.details === nextProps.book.details &&
+    prevProps.bookIndex === nextProps.bookIndex
+  )
+})
