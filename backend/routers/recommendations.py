@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from models import BookRequest
 from services.openai_service import client
 from services.prompt_service import build_recommendation_prompt, sanitize_for_prompt, build_tags_prompt
+from services.error_handler import APIErrorHandler
 from config import OPENAI_MODEL, OPENAI_MAX_TOKENS
 from openai import APIError, APITimeoutError, RateLimitError
 
@@ -63,8 +64,12 @@ async def _stream_recommendations(book_name: str, tags: list[str]):
                     yield f"data: {tags_data}\n\n"
                     
                     logger.info(f"Generated {len(tags)} tags for: {book_name}")
+            except (RateLimitError, APITimeoutError, APIError) as e:
+                # If tag fetching fails due to API error, continue without tags
+                APIErrorHandler.handle_openai_error(e)
+                tags = []
             except Exception as e:
-                # If tag fetching fails, continue without tags
+                # If tag fetching fails for other reasons, continue without tags
                 logger.warning(f"Failed to fetch tags: {str(e)}")
                 tags = []
         
@@ -93,23 +98,9 @@ async def _stream_recommendations(book_name: str, tags: list[str]):
                 api_params["max_tokens"] = OPENAI_MAX_TOKENS
             
             stream = client.chat.completions.create(**api_params)
-        except RateLimitError:
-            # Handle rate limiting gracefully
-            logger.error("OpenAI rate limit exceeded")
-            error_data = json.dumps({"error": "API rate limit exceeded. Please try again later."})
-            yield f"data: {error_data}\n\n"
-            return
-        except APITimeoutError:
-            # Handle timeout errors
-            logger.error("OpenAI API timeout")
-            error_data = json.dumps({"error": "Request timed out. Please try again."})
-            yield f"data: {error_data}\n\n"
-            return
-        except APIError as e:
-            # Handle other OpenAI API errors
-            logger.error(f"OpenAI API error: {str(e)}")
-            error_data = json.dumps({"error": "Error communicating with recommendation service. Please try again later."})
-            yield f"data: {error_data}\n\n"
+        except (RateLimitError, APITimeoutError, APIError) as e:
+            # Handle OpenAI API errors using centralized error handler
+            yield APIErrorHandler.handle_openai_error(e)
             return
         
         # Stream chunks from OpenAI
@@ -149,10 +140,8 @@ async def _stream_recommendations(book_name: str, tags: list[str]):
                 # Small delay to prevent overwhelming the client
                 await asyncio.sleep(0.01)
         except Exception as stream_error:
-            logger.error(f"Error during stream iteration: {str(stream_error)}")
-            logger.exception("Stream iteration error details")
-            error_data = json.dumps({"error": f"Error during streaming: {str(stream_error)}"})
-            yield f"data: {error_data}\n\n"
+            # Handle stream processing errors using centralized error handler
+            yield APIErrorHandler.handle_stream_error(stream_error)
             return
         
         # Log stream statistics
@@ -160,18 +149,9 @@ async def _stream_recommendations(book_name: str, tags: list[str]):
         
         if not accumulated_text:
             logger.warning(f"No content accumulated from stream for: {book_name}. Chunks processed: {chunk_count}")
-            if chunk_count == 0:
-                error_msg = f"No chunks received from API. Model '{OPENAI_MODEL}' may not exist or may not support streaming. Please check the model name and try again."
-                logger.error(error_msg)
-                error_data = json.dumps({"error": error_msg})
-                yield f"data: {error_data}\n\n"
-                return
-            else:
-                error_msg = f"Received {chunk_count} chunks but no content. The model may have returned an empty response."
-                logger.error(error_msg)
-                error_data = json.dumps({"error": error_msg})
-                yield f"data: {error_data}\n\n"
-                return
+            # Handle empty stream using centralized error handler
+            yield APIErrorHandler.handle_empty_stream(chunk_count)
+            return
         
         # Send final completion signal
         completion_data = json.dumps({"done": True, "text": accumulated_text})
@@ -180,10 +160,8 @@ async def _stream_recommendations(book_name: str, tags: list[str]):
         logger.info(f"Successfully streamed recommendations for: {book_name}")
     
     except Exception as e:
-        # Catch-all for unexpected errors
-        logger.exception("Unexpected error in streaming recommendations")
-        error_data = json.dumps({"error": "An unexpected error occurred. Please try again later."})
-        yield f"data: {error_data}\n\n"
+        # Catch-all for unexpected errors using centralized error handler
+        yield APIErrorHandler.handle_unexpected_error(e, "streaming recommendations")
 
 
 @router.post("/recommend")

@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException
 from models import TagsRequest, TagsResponse
 from services.openai_service import client
 from services.prompt_service import build_tags_prompt, sanitize_for_prompt
+from services.error_handler import APIErrorHandler
 from config import OPENAI_MODEL
 from openai import APIError, APITimeoutError, RateLimitError
 
@@ -49,14 +50,15 @@ async def get_tags(request: TagsRequest) -> TagsResponse:
                 max_completion_tokens=150
             )
         except (RateLimitError, APITimeoutError, APIError) as e:
-            logger.error(f"OpenAI API error while fetching tags: {str(e)}")
-            # Return empty tags list on error rather than failing completely
-            return TagsResponse(tags=[])
+            # Handle OpenAI API errors using centralized error handler
+            tags, _ = APIErrorHandler.handle_openai_error_for_tags(e)
+            return TagsResponse(tags=tags)
         
         # Extract tags from response
         if not response.choices or not response.choices[0].message.content:
-            logger.warning("Invalid response from OpenAI API for tags")
-            return TagsResponse(tags=[])
+            # Handle invalid response using centralized error handler
+            tags, _ = APIErrorHandler.handle_invalid_response("tags")
+            return TagsResponse(tags=tags)
         
         # Parse tags from comma-separated response
         tags_text = response.choices[0].message.content.strip()
@@ -79,6 +81,6 @@ async def get_tags(request: TagsRequest) -> TagsResponse:
         logger.warning(f"Validation error while fetching tags: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.exception("Unexpected error fetching tags")
-        # Return empty tags list on unexpected errors
-        return TagsResponse(tags=[])
+        # Handle unexpected errors using centralized error handler
+        tags, _ = APIErrorHandler.handle_unexpected_error_for_tags(e, "fetching tags")
+        return TagsResponse(tags=tags)
